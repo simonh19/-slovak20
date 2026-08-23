@@ -4,25 +4,21 @@ from pypdf import PdfReader
 PDF_URL='https://flashcardo.com/cdn/printable/german/Lernkarten-Einseitig-1000-Slowakisch-Deutsch.pdf'
 PDF_FILE='flashcardo-1000.pdf'
 urllib.request.urlretrieve(PDF_URL, PDF_FILE)
-
-# The printable source explicitly permits sharing for personal/classroom use,
-# but not selling. We use it only to build this private learning app.
 reader=PdfReader(PDF_FILE)
 
-# The PDF's text layer occasionally inserts accessibility/category labels
-# between a Slovak word and its German translation. Remove only those known
-# artefacts; real vocabulary such as matka/otec is kept when it is a card.
+# The PDF has a few stray accessibility/category labels in its text layer.
+# These are removed before pairing; the underlying source still provides the
+# actual Slovak-German cards.
 ARTEFACTS={
-    'všeobecný','človek','zviera','jedlo','umenie','počasie',
-    'inteligencia','topánka','dvere','matka','otec','telo','roh'
+    'všeobecný','človek','zviera','jedlo','umenie','počasie','inteligencia',
+    'topánka','dvere','matka','otec','telo','roh','budova','veľký','malý',
+    'zámka','škola','nápoj','domov'
 }
-
 FOOTER=re.compile(r'©\s*20\d\d\s+Flashcardo\.com.*$',re.I)
 
 def clean_line(s):
     s=FOOTER.sub('',s).strip()
-    s=re.sub(r'\s+',' ',s)
-    return s
+    return re.sub(r'\s+',' ',s)
 
 def category(sk,de):
     s=(sk+' '+de).lower()
@@ -37,48 +33,32 @@ def category(sk,de):
     if any(x in s for x in ['tier','hund','katze','fisch','vogel','wald','berg','see','regen','sonne']): return 'Natur'
     return 'Alltag'
 
-words=[]
-seen=set()
-
+words=[]; seen=set()
 for page in reader.pages:
-    raw=page.extract_text() or ''
-    lines=[clean_line(x) for x in raw.splitlines()]
-    lines=[x for x in lines if x and 'www.flashcardo.com' not in x.lower() and 'flashcardo.com' not in x.lower()]
-    # Remove only known PDF text-layer artefacts. They are normally standalone
-    # lines inserted between the Slovak term and the German answer.
-    lines=[x for x in lines if x.lower() not in ARTEFACTS]
-    # Cards in this PDF are stored as consecutive Slovak/German pairs.
+    lines=[clean_line(x) for x in (page.extract_text() or '').splitlines()]
+    lines=[x for x in lines if x and 'flashcardo.com' not in x.lower()]
+    lines=[x for x in lines if x.casefold() not in ARTEFACTS]
     i=0
-    while i+1 < len(lines):
+    while i+1<len(lines):
         sk,de=lines[i],lines[i+1]
-        # Ignore isolated cover/header material.
-        if len(sk)>80 or len(de)>100:
+        if len(sk)>80 or len(de)>100 or 'www.' in sk.lower() or 'www.' in de.lower() or '©' in sk or '©' in de:
             i+=2; continue
-        if sk.lower() in {'flashcardo.com','copyright','deutsch','slowakisch'}:
-            i+=2; continue
-        # Skip obvious page/URL artefacts while allowing numeric translations.
-        if 'www.' in sk.lower() or 'www.' in de.lower() or '©' in sk or '©' in de:
+        if sk.lower() in {'copyright','deutsch','slowakisch'}:
             i+=2; continue
         key=sk.casefold()
         if key not in seen:
-            seen.add(key)
-            words.append({'id':'fc:'+key,'sk':sk,'de':de,'cat':category(sk,de),'source':'Flashcardo 1000 Slovak-German'})
+            seen.add(key); words.append({'id':'fc:'+key,'sk':sk,'de':de,'cat':category(sk,de),'source':'Flashcardo 1000 Slovak-German'})
         i+=2
 
-# Add the app's own hotel/service cards if the PDF parser ever drops a pair.
-with open('extra_cards.json',encoding='utf-8') as f:
-    extras=json.load(f)
+# Fill only if the PDF text layer discarded a few cards.
+with open('extra_cards.json',encoding='utf-8') as f: extras=json.load(f)
 for de,sk in extras:
     if len(words)>=1000: break
     key=sk.casefold()
     if key in seen: continue
-    seen.add(key)
-    words.append({'id':'x:'+key,'sk':sk,'de':de,'cat':'Hotel & Service','source':'eigener Lernwortschatz'})
+    seen.add(key); words.append({'id':'x:'+key,'sk':sk,'de':de,'cat':'Hotel & Service','source':'eigener Lernwortschatz'})
 
-if len(words)<1000:
-    raise RuntimeError(f'Only {len(words)} clean cards parsed from the 1000-card source')
-
+if len(words)<1000: raise RuntimeError(f'Only {len(words)} clean cards parsed from the 1000-card source')
 words=words[:1000]
-with open('cards.json','w',encoding='utf-8') as f:
-    json.dump(words,f,ensure_ascii=False,separators=(',',':'))
+with open('cards.json','w',encoding='utf-8') as f: json.dump(words,f,ensure_ascii=False,separators=(',',':'))
 print(f'Generated {len(words)} clean cards')
