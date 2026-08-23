@@ -23,6 +23,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+      - name: Build 1000-card Slovak-German database
+        run: |
+          python -m pip install --quiet beautifulsoup4 pypdf
+          python generate_cards.py
+          python - <<'PY'
+          import json
+          with open('cards.json', encoding='utf-8') as f:
+              cards=json.load(f)
+          assert len(cards) == 1000, f'Expected 1000 cards, got {len(cards)}'
+          print('Verified exactly 1000 cards')
+          PY
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
