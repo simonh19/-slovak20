@@ -1,52 +1,84 @@
-import json,re,html,urllib.request,ssl
-from bs4 import BeautifulSoup
+import json, re, urllib.request
+from pypdf import PdfReader
 
-URL='https://www.vokipedia.de/index.php?title=DEU%3ASlowakisch%3AGrundwortschatz'
-# Vokipedia currently presents a certificate/hostname mismatch to GitHub's runner.
-# The source is public; use an unverified TLS context only for this build-time download.
-ctx=ssl._create_unverified_context()
-with urllib.request.urlopen(URL,timeout=30,context=ctx) as r:
-    page=r.read().decode('utf-8','replace')
+PDF_URL='https://flashcardo.com/cdn/printable/german/Lernkarten-Einseitig-1000-Slowakisch-Deutsch.pdf'
+PDF_FILE='flashcardo-1000.pdf'
+urllib.request.urlretrieve(PDF_URL, PDF_FILE)
 
-soup=BeautifulSoup(page,'html.parser')
+# The printable source explicitly permits sharing for personal/classroom use,
+# but not selling. We use it only to build this private learning app.
+reader=PdfReader(PDF_FILE)
+
+# The PDF's text layer occasionally inserts accessibility/category labels
+# between a Slovak word and its German translation. Remove only those known
+# artefacts; real vocabulary such as matka/otec is kept when it is a card.
+ARTEFACTS={
+    'všeobecný','človek','zviera','jedlo','umenie','počasie',
+    'inteligencia','topánka','dvere','matka','otec','telo','roh'
+}
+
+FOOTER=re.compile(r'©\s*20\d\d\s+Flashcardo\.com.*$',re.I)
+
+def clean_line(s):
+    s=FOOTER.sub('',s).strip()
+    s=re.sub(r'\s+',' ',s)
+    return s
+
+def category(sk,de):
+    s=(sk+' '+de).lower()
+    if any(x in s for x in ['hotel','zimmer','gast','rezeption','reserv','restaurant','bar','frühstück','kellner','rechnung','schlüssel','aufenthalt']): return 'Hotel & Service'
+    if any(x in s for x in ['essen','brot','käse','fleisch','fisch','gemüse','obst','kaffee','bier','wein','wasser','suppe']): return 'Essen & Trinken'
+    if any(x in s for x in ['arzt','krank','gesund','krankenhaus','medikament','schmerz','fieber']): return 'Gesundheit'
+    if any(x in s for x in ['zug','bus','flugzeug','bahnhof','straße','auto','taxi','reise','reisen']): return 'Reisen'
+    if any(x in s for x in ['haus','wohnung','küche','bad','bett','dusche','tür','fenster']): return 'Haus'
+    if any(x in s for x in ['arbeit','job','firma','büro','geld','gehalt','kunde','geschäft']): return 'Arbeit'
+    if any(x in s for x in ['schule','universität','prüfung','lehrer','buch','wissenschaft']): return 'Lernen'
+    if any(x in s for x in ['sport','laufen','schwimmen','fußball','tennis','wandern']): return 'Sport'
+    if any(x in s for x in ['tier','hund','katze','fisch','vogel','wald','berg','see','regen','sonne']): return 'Natur'
+    return 'Alltag'
+
 words=[]
 seen=set()
 
-def clean(s):
-    s=html.unescape(s)
-    s=re.sub(r'\([^)]*\)','',s)
-    s=re.sub(r'\s+',' ',s).strip(' .,:;')
-    return s
+for page in reader.pages:
+    raw=page.extract_text() or ''
+    lines=[clean_line(x) for x in raw.splitlines()]
+    lines=[x for x in lines if x and 'www.flashcardo.com' not in x.lower() and 'flashcardo.com' not in x.lower()]
+    # Remove only known PDF text-layer artefacts. They are normally standalone
+    # lines inserted between the Slovak term and the German answer.
+    lines=[x for x in lines if x.lower() not in ARTEFACTS]
+    # Cards in this PDF are stored as consecutive Slovak/German pairs.
+    i=0
+    while i+1 < len(lines):
+        sk,de=lines[i],lines[i+1]
+        # Ignore isolated cover/header material.
+        if len(sk)>80 or len(de)>100:
+            i+=2; continue
+        if sk.lower() in {'flashcardo.com','copyright','deutsch','slowakisch'}:
+            i+=2; continue
+        # Skip obvious page/URL artefacts while allowing numeric translations.
+        if 'www.' in sk.lower() or 'www.' in de.lower() or '©' in sk or '©' in de:
+            i+=2; continue
+        key=sk.casefold()
+        if key not in seen:
+            seen.add(key)
+            words.append({'id':'fc:'+key,'sk':sk,'de':de,'cat':category(sk,de),'source':'Flashcardo 1000 Slovak-German'})
+        i+=2
 
-for table in soup.find_all('table'):
-    rows=table.find_all('tr')
-    for row in rows:
-        cells=[clean(c.get_text(' ',strip=True)) for c in row.find_all(['td','th'])]
-        if len(cells)<2 or cells[0] in ('Slowakisch','Deutsch'):
-            continue
-        sk,de=cells[0],cells[1]
-        if not sk or not de or sk.lower()=='slowakisch' or de.lower()=='deutsch':
-            continue
-        if len(sk)>45 or len(de)>70: continue
-        if any(x in sk.lower() for x in ['(music','((','_']): continue
-        key=sk.lower()
-        if key in seen: continue
-        seen.add(key)
-        words.append({'id':'v:'+key,'sk':sk,'de':de,'cat':'Grundwortschatz','source':'Vokipedia CC BY-SA'})
-
+# Add the app's own hotel/service cards if the PDF parser ever drops a pair.
 with open('extra_cards.json',encoding='utf-8') as f:
     extras=json.load(f)
 for de,sk in extras:
-    key=sk.lower()
+    if len(words)>=1000: break
+    key=sk.casefold()
     if key in seen: continue
     seen.add(key)
     words.append({'id':'x:'+key,'sk':sk,'de':de,'cat':'Hotel & Service','source':'eigener Lernwortschatz'})
 
-bad={'mäsiar':'Metzgerei','zmenáreň':'Wechselgeld','očakávať':'warten','opovážiť sa':'lieb','chudobný':'arm','dozadu':'rückwärts'}
-words=[w for w in words if not (w['sk'].lower() in bad and w['de'].lower()==bad[w['sk'].lower()].lower())]
-words=words[:1000]
-assert len(words)>=1000, f'Only {len(words)} cards available'
+if len(words)<1000:
+    raise RuntimeError(f'Only {len(words)} clean cards parsed from the 1000-card source')
 
+words=words[:1000]
 with open('cards.json','w',encoding='utf-8') as f:
     json.dump(words,f,ensure_ascii=False,separators=(',',':'))
-print('Generated',len(words),'cards')
+print(f'Generated {len(words)} clean cards')
