@@ -23,6 +23,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Build vocabulary database
+        run: |
+          python -m pip install --quiet beautifulsoup4
+          python generate_cards.py
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
