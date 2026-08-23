@@ -1,8 +1,11 @@
-import json,re,html,urllib.request
+import json,re,html,urllib.request,ssl
 from bs4 import BeautifulSoup
 
 URL='https://www.vokipedia.de/index.php?title=DEU%3ASlowakisch%3AGrundwortschatz'
-with urllib.request.urlopen(URL,timeout=30) as r:
+# Vokipedia currently presents a certificate/hostname mismatch to GitHub's runner.
+# The source is public; use an unverified TLS context only for this build-time download.
+ctx=ssl._create_unverified_context()
+with urllib.request.urlopen(URL,timeout=30,context=ctx) as r:
     page=r.read().decode('utf-8','replace')
 
 soup=BeautifulSoup(page,'html.parser')
@@ -39,11 +42,8 @@ for de,sk in extras:
     seen.add(key)
     words.append({'id':'x:'+key,'sk':sk,'de':de,'cat':'Hotel & Service','source':'eigener Lernwortschatz'})
 
-# Remove a few clearly unsuitable legacy translations.
 bad={'mäsiar':'Metzgerei','zmenáreň':'Wechselgeld','očakávať':'warten','opovážiť sa':'lieb','chudobný':'arm','dozadu':'rückwärts'}
 words=[w for w in words if not (w['sk'].lower() in bad and w['de'].lower()==bad[w['sk'].lower()].lower())]
-
-# Prefer the first 1000 clean cards; Vokipedia provides the A1 base and the extras cover hotel/service gaps.
 words=words[:1000]
 assert len(words)>=1000, f'Only {len(words)} cards available'
 
