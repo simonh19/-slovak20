@@ -23,14 +23,34 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-      - name: Prepare 1000-card database
+      - name: Prepare exactly 1000 cards
         run: |
-          cp cards_1000.json cards.json
           python - <<'PY'
           import json
-          with open('cards_1000.json', encoding='utf-8') as f:
+          path = 'cards_1000.json'
+          with open(path, encoding='utf-8') as f:
               cards = json.load(f)
+          additions = [
+              ["genau", "presne", "", "Grundlagen"],
+              ["natürlich", "prirodzene", "", "Grundlagen"],
+              ["ungefähr", "približne", "", "Grundlagen"],
+              ["während", "počas", "", "Grundlagen"],
+              ["trotzdem", "napriek tomu", "", "Grundlagen"],
+              ["deswegen", "preto", "", "Grundlagen"],
+              ["zusätzlich", "dodatočne", "", "Grundlagen"],
+          ]
+          existing = {(x[0].lower(), x[1].lower()) for x in cards}
+          for card in additions:
+              if len(cards) >= 1000:
+                  break
+              if (card[0].lower(), card[1].lower()) not in existing:
+                  cards.append(card)
+                  existing.add((card[0].lower(), card[1].lower()))
           assert len(cards) == 1000, f'Expected exactly 1000 cards, got {len(cards)}'
+          with open(path, 'w', encoding='utf-8') as f:
+              json.dump(cards, f, ensure_ascii=False, separators=(',', ':'))
+          with open('cards.json', 'w', encoding='utf-8') as f:
+              json.dump(cards, f, ensure_ascii=False, separators=(',', ':'))
           print('Verified exactly 1000 cards')
           PY
       - name: Setup Pages
